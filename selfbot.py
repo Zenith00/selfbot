@@ -30,6 +30,8 @@ from config import *
 from utils.utils_text import dict2rows
 
 logging.basicConfig(level=logging.INFO)
+
+
 if config["remote_mongo"]:
     mongo_client = motor.motor_asyncio.AsyncIOMotorClient(
         "mongodb://{usn}:{pwd}@{site}".format(
@@ -185,6 +187,7 @@ async def update_messages():
 
 @client.event
 async def on_message(message_in):
+    await mess2log(message_in)
     try:
         if message_in.content.startswith(config["prefix"]["command"]) and message_in.author.id == client.user.id:
             full_command = message_in.content.replace(
@@ -216,10 +219,6 @@ async def mention_to_id(command_list):
 
 
 async def perform_command(command, params, message_in):
-    try:
-        await mess2log(message_in)
-    except AttributeError:
-        print(traceback.format_exc())
     params = await mention_to_id(params)
     await client.delete_message(message_in)
     output = []
@@ -253,7 +252,7 @@ async def perform_command(command, params, message_in):
                 big_text += "   "
             else:
                 big_text += "​:regional_indicator_{c}:".format(c=character)
-        output.append((big_text, "text"))
+        output.append(("inplace", big_text, "text"))
     if command == "ava":
         await command_avatar(params, message_in)
 
@@ -420,13 +419,13 @@ async def command_query(params, message_in):
                     embed.add_field(
                         name="First Join", value=server_joins[0], inline=True)
                 if "bans" in user_dict.keys(
-                ) and message_in.server.id in user_dict["server_joins"].keys():
+                ) and message_in.server.id in user_dict["bans"].keys():
                     bans = user_dict["bans"][message_in.server.id]
                     bans = [ban[:10] for ban in bans]
                     bans = str(bans)[1:-1]
                     embed.add_field(name="Bans", value=bans, inline=True)
                 if "unbans" in user_dict.keys(
-                ) and message_in.server.id in user_dict["server_joins"].keys():
+                ) and message_in.server.id in user_dict["unbans"].keys():
                     unbans = user_dict["unbans"][message_in.server.id]
                     unbans = [unban[:10] for unban in unbans]
                     unbans = str(unbans)[1:-1]
