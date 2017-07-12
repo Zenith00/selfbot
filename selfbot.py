@@ -26,6 +26,7 @@ import TOKENS
 from utils import utils_file
 from fuzzywuzzy import fuzz
 from collections import defaultdict
+import tqdm
 from config import *
 from utils.utils_text import dict2rows
 
@@ -149,7 +150,7 @@ async def ensure_database_struct():
     try:
         await mongo_client.discord.create_collection("message_log")
     except:
-        print(traceback.format_exc())
+        pass
     messages = mongo_client.discord.message_log
     message_index_info = await messages.index_information()
     missing_indexes = list({
@@ -171,7 +172,7 @@ async def update_members():
         memberlist = []
         for member in server.members:
             memberlist.append(member)
-        for member in memberlist:
+        for member in tqdm.tqdm(memberlist):
             await import_user(member)
 
 
