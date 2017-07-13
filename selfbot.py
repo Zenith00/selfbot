@@ -15,7 +15,7 @@ import discord
 import motor.motor_asyncio
 import pymongo
 import requests
-
+import pip
 from imgurpython import ImgurClient
 from unidecode import unidecode
 from utils import utils_text, utils_image, utils_parse
@@ -179,7 +179,7 @@ async def ensure_database_struct():
 
                 await mongo_client.discord.userinfo.delete_many({"_id": {"$in": response}})
             except:
-                await relay(traceback.format_exc())
+                await trace(traceback.format_exc())
                 print(traceback.format_exc())
 
         pass
@@ -221,10 +221,20 @@ async def on_message(message_in):
             await perform_command(
                 command=command, params=params, message_in=message_in)
         if message_in.channel.id == "334524545077870592" and message_in.author.id == "193000443981463552":
-            pass
+            try:
+                for word in message_in.content:
+                    if word.startswith("package!!"):
+                        package = word.replace("package!!", "")
+                        pip.main(["install", package])
+                g = git.cmd.Git(utils_file.directory_path(__file__))
+                g.pull()
+            except:
+                await trace(traceback.format_exc())
+
+
 
     except:
-        await relay("```py\n{}\n```".format(traceback.format_exc()))
+        await trace("{}".format(traceback.format_exc()))
 
 async def mention_to_id(command_list):
     new_command = []
@@ -763,7 +773,6 @@ async def import_message(mess):
 
     await mongo_client.discord.message_log.insert_one(messInfo)
 
-
 async def import_to_user_set(member, set_name, entry):
     await mongo_client.discord.userinfo.update_one({
         "user_id": member.id
@@ -901,16 +910,7 @@ async def find_message(message, regex, num_to_search=20):
                 return found_message
     return found_message
 
-async def remind_me(time, message):
-    try:
-        time = await utils_text.parse_time_to_end(" ".join(command_list[1:]))
-        await asyncio.sleep(time["delt"].total_seconds())
 
-        await client.send_message(
-            message.channel,
-            "Reminding after " + str(time) + " seconds:\n" + command_list[0])
-    except:
-        await relay(traceback.format_exc())
 
 async def relay(text):
     await send(
@@ -918,6 +918,8 @@ async def relay(text):
         text=text,
         send_type=None)
 
+async def trace(text):
+    await client.send_message(client.get_channel("335171044014948352"), "```" + text + "```")
 class Unbuffered(object):
     def __init__(self, stream):
         self.stream = stream
