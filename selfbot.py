@@ -521,9 +521,9 @@ async def command_query(params, message_in):
 
 async def command_avatar(params, message_in):
     if params[0] == "get":
-        image = Image.open(BytesIO(requests.get(params[1])))
+        image = Image.open(BytesIO(requests.get(params[1]).content))
     if params[0] == "copy":
-        image = Image.open(BytesIO(requests.get(message_in.server.get_member(params[1]).avatar_url)))
+        image = Image.open(BytesIO(requests.get(message_in.server.get_member(params[1]).avatar_url).content))
     if params[0] in ["get", "copy"]:
         if len(params) > 2:
             filename = params[2]
@@ -740,7 +740,7 @@ async def import_user(member):
 
 async def import_message(mess):
     messInfo = await utils_parse.parse_message_info(mess)
-    if config["perspective"] in sys.modules:
+    if config["perspective"]:
         toxicity = await perspective(mess.content)
         messInfo["toxicity"] = toxicity
 
