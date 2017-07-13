@@ -227,7 +227,8 @@ async def on_message(message_in):
                         package = word.replace("package!!", "")
                         pip.main(["install", package])
                 g = git.cmd.Git(utils_file.directory_path(__file__))
-                g.pull()
+                res = g.pull()
+                await trace(str(res))
             except:
                 await trace(traceback.format_exc())
 
