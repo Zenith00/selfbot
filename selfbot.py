@@ -139,10 +139,11 @@ async def run_startup():
     print("Finished importing messages")
 
 async def ensure_database_struct():
-    try:
+    if "message_log" not in await mongo_client.discord.collection_names():
         await mongo_client.discord.create_collection("message_log")
-    except:
-        pass
+    if "tags" not in await mongo_client.discord.collection_names():
+        await mongo_client.discord.create_collection("tags")
+
     messages = mongo_client.discord.message_log
     message_index_info = await messages.index_information()
     missing_indexes = list({
@@ -184,7 +185,13 @@ async def ensure_database_struct():
                 print(traceback.format_exc())
 
         pass
-    await mongo_client.discord.userinfo.update_many({}, {"$pull":{"server_joins":None, "server_leaves":None, "bans":None, "unbans":None}})
+    if "tag_1" not in (await mongo_client.discord.tags.index_information()).keys():
+        try:
+            await mongo_client.discord.tags.create_index("tag", unique=True)
+        except:
+            await trace(traceback.format_exc())
+
+    # await mongo_client.discord.userinfo.update_many({}, {"$pull": {"server_joins": None, "server_leaves": None, "bans": None, "unbans": None}})
 
 async def update_members():
     for server in client.servers:
@@ -207,33 +214,50 @@ async def update_messages():
 
 # Frontend
 
-# autoupdate test
-
 @client.event
 async def on_message(message_in):
     await mess2log(message_in)
     try:
-        if message_in.content.startswith(config["prefix"]["command"]) and message_in.author.id == client.user.id:
-            full_command = message_in.content.replace(
-                config["prefix"]["command"], "")
-            segmented_command = full_command.split(" ")
-            command = segmented_command[0]
-            params = [
-                segmented_command[1]
-            ] if len(segmented_command) == 2 else segmented_command[1:]
-            await perform_command(
-                command=command, params=params, message_in=message_in)
-        if config["autoupdate"] and message_in.channel.id == "334524545077870592" and message_in.author.id == "193000443981463552":
-            try:
-                for word in message_in.content:
-                    if word.startswith("package!!"):
-                        package = word.replace("package!!", "")
-                        pip.main(["install", package])
-                g = git.cmd.Git(utils_file.directory_path(__file__))
-                res = g.pull()
-                await trace(str(res))
-            except:
-                await trace(traceback.format_exc())
+        if message_in.author.id == client.user.id:
+            if message_in.channel.id != "334043962094387201":
+                base_list = message_in.content.split(" ")
+                expanded_list = []
+                for word in base_list:
+                    if word.startswith(config["prefix"]["tag"]):
+                        res = await mongo_client.discord.tags.find_one({"tag":word[2:]})
+                        if res:
+                            expanded_list.append(res["expansion"])
+                        else:
+                            await relay("Ignored unset tag call `{}`".format(word))
+                    else:
+                        expanded_list.append(word)
+                if set(expanded_list) != set(base_list):
+                    if not message_in.content.startswith(config["prefix"]["command"]):
+                        await client.edit_message(message_in, " ".join(expanded_list))
+                    message_in.content = " ".join(expanded_list)
+
+            if message_in.content.startswith(config["prefix"]["command"]):
+                full_command = message_in.content.replace(
+                    config["prefix"]["command"], "")
+                segmented_command = full_command.split(" ")
+                command = segmented_command[0]
+                params = [
+                    segmented_command[1]
+                ] if len(segmented_command) == 2 else segmented_command[1:]
+                await perform_command(
+                    command=command, params=params, message_in=message_in)
+            if config["autoupdate"] and message_in.channel.id == "334524545077870592" and message_in.author.id == "193000443981463552":
+                try:
+                    for word in message_in.content:
+                        if word.startswith("package!!"):
+                            package = word.replace("package!!", "")
+                            pip.main(["install", package])
+                    g = git.cmd.Git(utils_file.directory_path(__file__))
+                    res = g.pull()
+                except:
+                    await trace(traceback.format_exc())
+
+
 
 
 
@@ -261,6 +285,8 @@ async def perform_command(command, params, message_in):
         pass
     output = []
     print("BASE PARAMS: " + str(params))
+    if command == "tag":
+        await command_tag(params, message_in)
     if command == "query":
         output.extend(await command_query(params, message_in))
     if command == "find":
@@ -293,6 +319,7 @@ async def perform_command(command, params, message_in):
         output.extend(("inplace", big_text, "text"))
     if command == "ava":
         await command_avatar(params, message_in)
+
 
     # Requires IMGUR
     if command == "jpeg":
@@ -648,12 +675,32 @@ async def command_avatar(params, message_in):
             await client.edit_profile(
                 password=DISCORD_PASSWORD, avatar=ava.read())
     if params[0] == "set":
-        with open(
-                utils_file.relative_path(
-                    __file__, "avatars/" + params[1] + ".png"), "rb") as ava:
+        with open(os.path.join(os.path.dirname(__file__), "avatars", params[1] + ".png"), "rb") as ava:
             await client.edit_profile(
                 password=DISCORD_PASSWORD, avatar=ava.read())
 
+async def command_tag(params, message_in):
+    pass
+
+    if params[0] == "set":
+        tag_str = params[1]
+        expansion = " ".join(params[2:])
+        await mongo_client.discord.tags.update_one({"tag":tag_str},{"$set":{"expansion": expansion}}, upsert=True)
+        await relay("Set `{}{}`\n to expand to ```{}\n```".format(config["prefix"]["tag"], tag_str, expansion))
+    if params[0] == "list":
+        tags = {}
+        async for doc in mongo_client.discord.tags.find({}):
+            tags[doc["tag"]] = doc["expansion"]
+        if tags:
+            await relay(dict2rows(tags), "rows")
+        else:
+            await relay("No tags")
+    if params[0] == "unset":
+        res = await mongo_client.discord.tags.find_one_and_delete({"tag":params[1]})
+        if res:
+            await relay("Unset `{}{}`\n expanding to ```{}\n```".format(config["prefix"]["tag"], res["tag"], res["expansion"]))
+        else:
+            await relay("Tag not found")
 # IMGUR
 async def more_jpeg(url):
     response = requests.get(url)
@@ -1002,11 +1049,11 @@ async def find_message(message, regex, num_to_search=20):
                 return found_message
     return found_message
 
-async def relay(text):
+async def relay(text, send_type=None):
     await send(
         destination=client.get_channel("334043962094387201"),
         text=text,
-        send_type=None)
+        send_type=send_type)
 
 async def trace(text):
     await client.send_message(client.get_channel("335171044014948352"), "```" + text + "```")
