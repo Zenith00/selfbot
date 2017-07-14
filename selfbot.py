@@ -207,6 +207,7 @@ async def update_messages():
 
 # Frontend
 
+# autoupdate test
 
 @client.event
 async def on_message(message_in):
