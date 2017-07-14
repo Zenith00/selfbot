@@ -1,5 +1,6 @@
 # from . import compat
 import asyncio
+import copy
 import heapq
 import logging
 import os
@@ -30,7 +31,7 @@ import tqdm
 from config import *
 from utils.utils_text import dict2rows
 
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
 if config["remote_mongo"]:
     mongo_client = motor.motor_asyncio.AsyncIOMotorClient(
@@ -183,6 +184,7 @@ async def ensure_database_struct():
                 print(traceback.format_exc())
 
         pass
+    await mongo_client.discord.userinfo.update_many({}, {"$pull":{"server_joins":None, "server_leaves":None, "bans":None, "unbans":None}})
 
 async def update_members():
     for server in client.servers:
@@ -259,9 +261,9 @@ async def perform_command(command, params, message_in):
     output = []
     print("BASE PARAMS: " + str(params))
     if command == "query":
-        output.append(await command_query(params, message_in))
+        output.extend(await command_query(params, message_in))
     if command == "find":
-        output.append((config["find"]["current"]["output"], await find_user(
+        output.extend((config["find"]["current"]["output"], await find_user(
             matching_ident=params[:-2] if "|" in params else params,
             find_type="current",
             server=message_in.server,
@@ -287,7 +289,7 @@ async def perform_command(command, params, message_in):
                 big_text += "   "
             else:
                 big_text += "​:regional_indicator_{c}:".format(c=character)
-        output.append(("inplace", big_text, "text"))
+        output.extend(("inplace", big_text, "text"))
     if command == "ava":
         await command_avatar(params, message_in)
 
@@ -295,7 +297,7 @@ async def perform_command(command, params, message_in):
     if command == "jpeg":
         url = params[0]
         url = await more_jpeg(url)
-        output.append(("{url}. Compressed to {ratio}% of original".format(
+        output.extend(("{url}. Compressed to {ratio}% of original".format(
             url=url[0], ratio=url[1]), "text"))
     # Requires IMGUR
     # Posts X images from a given imgur album's ID: http://imgur.com/a/ID
@@ -310,7 +312,7 @@ async def perform_command(command, params, message_in):
             await client.send_message(message_in.channel, link)
 
     if command == "logs":
-        output.append(await command_logs(params, {
+        output.extend(await command_logs(params, {
             "server" : message_in.server,
             "channel": message_in.channel,
             "user"   : message_in.author
@@ -327,6 +329,7 @@ async def perform_command(command, params, message_in):
             time_dict["readable"], raw.split(",")[0]))
     if output:
         for item in output:
+            print(item)
             await parse_output(item, message_in.channel)
 
 async def parse_output(output, context):
@@ -383,7 +386,7 @@ async def command_logs(params, context):
         query = await log_query_parser(params[1:], context)
         if isinstance(query, str):
             print("Failing...")
-            return "relay", query, None
+            return [("relay", query, None)]
         filter = {}
         translate = {
             "users"   : "user_id",
@@ -400,10 +403,10 @@ async def command_logs(params, context):
                 limit=int(params[0])):
             output_text += await format_message_to_log(doc) + "\n"
 
-        return config["logs"]["output"], "\n".join(
-            utils_text.hastebin(output_text)), None
+        return [(config["logs"]["output"], "\n".join(
+            utils_text.hastebin(output_text)), None)]
     except:
-        return "relay", traceback.format_exc(), None
+        return [("relay", traceback.format_exc(), None)]
 
 async def log_query_parser(query, context):
     try:
@@ -428,109 +431,205 @@ async def log_query_parser(query, context):
             traceback.format_exc())
 
 async def command_query(params, message_in):
-    if params[0] == "user":
-        if params[1] == "embed":
-            target_member = message_in.server.get_member(params[2])
-            user_dict = await export_user(target_member.id)
+    try:
+        if params[0] == "user":
+            if params[1] == "embed":
+                target_member = message_in.server.get_member(params[2])
+                user_dict = await export_user(target_member.id)
 
-            embed = discord.Embed(
-                title="{name}#{discrim}'s userinfo".format(
-                    name=target_member.name,
-                    discrim=str(target_member.discriminator)),
-                type="rich")
-            avatar_link = target_member.avatar_url
-            embed.add_field(name="ID", value=target_member.id, inline=True)
-            if user_dict:
-                if "server_joins" in user_dict.keys(
-                ) and message_in.server.id in user_dict["server_joins"].keys():
-                    server_joins = user_dict["server_joins"][
-                        message_in.server.id]
-                    server_joins = [join[:10] for join in server_joins]
-                    embed.add_field(
-                        name="First Join", value=server_joins[0], inline=True)
-                if "bans" in user_dict.keys(
-                ) and message_in.server.id in user_dict["bans"].keys():
-                    bans = user_dict["bans"][message_in.server.id]
-                    bans = [ban[:10] for ban in bans]
-                    bans = str(bans)[1:-1]
-                    embed.add_field(name="Bans", value=bans, inline=True)
-                if "unbans" in user_dict.keys(
-                ) and message_in.server.id in user_dict["unbans"].keys():
-                    unbans = user_dict["unbans"][message_in.server.id]
-                    unbans = [unban[:10] for unban in unbans]
-                    unbans = str(unbans)[1:-1]
-                    embed.add_field(name="Unbans", value=unbans, inline=True)
-            embed.add_field(
-                name="Creation",
-                value=target_member.created_at.strftime("%B %d, %Y"),
-                inline=True)
-            if isinstance(target_member, discord.Member):
-                roles = [role.name for role in target_member.roles][1:]
-                if roles:
-                    embed.add_field(
-                        name="Roles", value=", ".join(roles), inline=True)
-                voice = target_member.voice
-                if voice.voice_channel:
-                    voice_name = voice.voice_channel.name
-                    embed.add_field(name="Current VC", value=voice_name)
-                status = str(target_member.status)
-            else:
-                if target_member in await client.get_bans(message_in.server):
-                    status = "Banned"
+                embed = discord.Embed(
+                    title="{name}#{discrim}'s userinfo".format(
+                        name=target_member.name,
+                        discrim=str(target_member.discriminator)),
+                    type="rich")
+                avatar_link = target_member.avatar_url
+                embed.add_field(name="ID", value=target_member.id, inline=True)
+                if user_dict:
+                    if "server_joins" in user_dict.keys(
+                    ) and message_in.server.id in user_dict["server_joins"].keys():
+                        server_joins = user_dict["server_joins"][
+                            message_in.server.id]
+                        server_joins = [join[:10] for join in server_joins]
+                        embed.add_field(
+                            name="First Join", value=server_joins[0], inline=True)
+                    if "bans" in user_dict.keys(
+                    ) and message_in.server.id in user_dict["bans"].keys():
+                        bans = user_dict["bans"][message_in.server.id]
+                        bans = [ban[:10] for ban in bans]
+                        bans = str(bans)[1:-1]
+                        embed.add_field(name="Bans", value=bans, inline=True)
+                    if "unbans" in user_dict.keys(
+                    ) and message_in.server.id in user_dict["unbans"].keys():
+                        unbans = user_dict["unbans"][message_in.server.id]
+                        unbans = [unban[:10] for unban in unbans]
+                        unbans = str(unbans)[1:-1]
+                        embed.add_field(name="Unbans", value=unbans, inline=True)
+                embed.add_field(
+                    name="Creation",
+                    value=target_member.created_at.strftime("%B %d, %Y"),
+                    inline=True)
+                if isinstance(target_member, discord.Member):
+                    roles = [role.name for role in target_member.roles][1:]
+                    if roles:
+                        embed.add_field(
+                            name="Roles", value=", ".join(roles), inline=True)
+                    voice = target_member.voice
+                    if voice.voice_channel:
+                        voice_name = voice.voice_channel.name
+                        embed.add_field(name="Current VC", value=voice_name)
+                    status = str(target_member.status)
                 else:
-                    status = "Not part of the server"
-            embed.add_field(name="Status", value=status, inline=True)
-            if avatar_link:
-                embed.set_thumbnail(url=avatar_link)
-                embed.set_footer(text=avatar_link.replace(".webp", ".png"))
+                    if target_member in await client.get_bans(message_in.server):
+                        status = "Banned"
+                    else:
+                        status = "Not part of the server"
+                embed.add_field(name="Status", value=status, inline=True)
+                if avatar_link:
+                    embed.set_thumbnail(url=avatar_link)
+                    embed.set_footer(text=avatar_link.replace(".webp", ".png"))
 
-                if config["query"]["user"]["embed"]["color_average_bar"]:
-                    color = utils_image.average_color_url(avatar_link)
-                    hex_int = int(color, 16)
-                    embed.colour = discord.Colour(hex_int)
-                embed.set_thumbnail(url=target_member.avatar_url)
-            return config["query"]["user"]["embed"]["output"], embed, "embed"
+                    if config["query"]["user"]["embed"]["color_average_bar"]:
+                        color = utils_image.average_color_url(avatar_link)
+                        hex_int = int(color, 16)
+                        embed.colour = discord.Colour(hex_int)
+                    embed.set_thumbnail(url=target_member.avatar_url)
+                return [(config["query"]["user"]["embed"]["output"], embed, "embed")]
 
-        if params[1] == "dump":
-            return config["query"]["user"]["dump"], dict2rows(
-                await export_user(params[2])), None
-    if params[0] == "roles":
-        if params[1] == "list":
-            role_list = []
-            role_list.append(
-                ["Name", "ID", "Position", "Color", "Hoisted", "Mentionable"])
-            for role in message_in.server.role_hierarchy:
-                new_entry = [
-                    role.name, "\"{}\"".format(str(role.id)),
-                    str(role.position), str(role.colour.to_tuple()),
-                    str(role.hoist), str(role.mentionable)
-                ]
-                role_list.append(new_entry)
-            return config["query"]["roles"]["list"][
-                       "output"], role_list, "rows"
-        if params[1] == "members":
-            role_members = await get_role_members(
-                await get_role(message_in.server, params[2]))
-            output = config["query"]["roles"]["members"]["delimiter"].join(
-                [member.mention for member in role_members])
-            return config["query"]["roles"]["members"]["output"], output, None
-    if params[0] == "emoji":
+            if params[1] == "dump":
+                print("dumping")
+                user_dict = await export_user(params[2])
+                user_dict = utils_text.remove_none(user_dict)
+                print(user_dict)
+                # await trace("```py\n" + str(user_dict) + "\n```")
+                target = message_in.server.get_member(params[2])
+                if target:
+                    name = target.name
+                    discrim = "#" + target.discriminator
+                else:
+                    name = params[2]
+                    discrim = ""
 
-        import re
-        emoji_id = utils_text.regex_test("\d+(?=>)",
-                                         " ".join(params[1:])).group(0)
-        print(emoji_id)
-        server_name = None
-        for emoji in client.get_all_emojis():
-            if emoji_id == emoji.id:
-                server_name = emoji.server.name
-                break
-        return config["query"]["emoji"]["output"], server_name, None
-    if params[0] == "owner":
-        return config["query"]["owner"][
-                   "output"], message_in.server.owner.mention, "text"
+                embed = discord.Embed(
+                    title="{name}#{discrim}'s userinfo".format(
+                        name=name,
+                        discrim=str(discrim)),
+                    type="rich")
+                embed.add_field(
+                    name="Creation",
+                    value=user_dict["created_at"],
+                    inline=True
+                )
+                embed.add_field(
+                    name="Nicks",
+                    value=user_dict["nicks"],
+                    inline=False
+                )
+                embed.add_field(
+                    name="Names",
+                    value=user_dict["names"],
+                    inline=False
+                )
+                output = []
+                output.append((config["query"]["user"]["dump"], embed, "embed"))
+                list_of_rows = []
 
-    pass
+                print("!" * 20)
+
+                if "server_joins" in user_dict.keys():
+                    base = [["Server Joins", "--"]]
+                    named_dict = {}
+                    for key in user_dict["server_joins"].keys():
+                        if client.get_server(key):
+                            try:
+                                name = client.get_server(key).name
+                                if not name:
+                                    name = key
+                            except:
+                                name = key
+                            named_dict[name] = user_dict["server_joins"][key]
+                        else:
+                            print(key)
+                    base.extend(dict2rows(named_dict))
+                    output.append([config["query"]["user"]["dump"], base, "rows"])
+                    # print(output)
+
+                if "server_leaves" in user_dict.keys():
+                    base = [["Server Leaves", "--"]]
+                    named_dict = {}
+                    for key in user_dict["server_leaves"].keys():
+                        if client.get_server(key):
+                            named_dict[client.get_server(key).name] = user_dict["server_leaves"][key]
+                        else:
+                            print(key)
+                    base.extend(dict2rows(named_dict))
+                    output.append([config["query"]["user"]["dump"], base, "rows"])
+                    # print(output)
+
+                if "bans" in user_dict.keys():
+                    base = [["Server Bans", "--"]]
+                    named_dict = {}
+                    for key in user_dict["bans"].keys():
+                        if client.get_server(key):
+                            named_dict[client.get_server(key).name] = user_dict["bans"][key]
+                        else:
+                            print(key)
+                    base.extend(dict2rows(named_dict))
+                    output.append([config["query"]["user"]["dump"], base, "rows"])
+                    # print(output)
+
+                if "unbans" in user_dict.keys():
+                    base = [["Server Unbans", "--"]]
+                    named_dict = {}
+                    for key in user_dict["unbans"].keys():
+                        if client.get_server(key):
+                            named_dict[client.get_server(key).name] = user_dict["unbans"][key]
+                        else:
+                            print(key)
+                    base.extend(dict2rows(named_dict))
+                    output.append([config["query"]["user"]["dump"], base, "rows"])
+                    # print(output)
+
+                # print(output)
+                return output
+
+        if params[0] == "roles":
+            if params[1] == "list":
+                role_list = []
+                role_list.append(
+                    ["Name", "ID", "Position", "Color", "Hoisted", "Mentionable"])
+                for role in message_in.server.role_hierarchy:
+                    new_entry = [
+                        role.name, "\"{}\"".format(str(role.id)),
+                        str(role.position), str(role.colour.to_tuple()),
+                        str(role.hoist), str(role.mentionable)
+                    ]
+                    role_list.append(new_entry)
+                return [(config["query"]["roles"]["list"][
+                             "output"], role_list, "rows")]
+
+            if params[1] == "members":
+                role_members = await get_role_members(
+                    await get_role(message_in.server, params[2]))
+                output = config["query"]["roles"]["members"]["delimiter"].join(
+                    [member.mention for member in role_members])
+                return [(config["query"]["roles"]["members"]["output"], output, None)]
+        if params[0] == "emoji":
+            import re
+            emoji_id = utils_text.regex_test("\d+(?=>)",
+                                             " ".join(params[1:])).group(0)
+            print(emoji_id)
+            server_name = None
+            for emoji in client.get_all_emojis():
+                if emoji_id == emoji.id:
+                    server_name = emoji.server.name
+                    break
+            return [(config["query"]["emoji"]["output"], server_name, None)]
+        if params[0] == "owner":
+            return [(config["query"]["owner"]["output"], message_in.server.owner.mention, "text")]
+
+
+    except:
+        await trace(traceback.format_exc())
 
 async def command_avatar(params, message_in):
     if params[0] == "get":
@@ -910,8 +1009,6 @@ async def find_message(message, regex, num_to_search=20):
                 found_message = messageCheck
                 return found_message
     return found_message
-
-
 
 async def relay(text):
     await send(

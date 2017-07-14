@@ -75,7 +75,9 @@ def multi_column(list_of_list_of_rows, left_just):
 def multi_block(list_of_rows, left_just):
     test_list = []
     final_list = []
+
     for row in list_of_rows:
+
         old_list = copy.deepcopy(test_list)
         test_list.append(row)
         text = pretty_column(test_list, left_just)
@@ -186,6 +188,15 @@ def split_list(alist, wanted_parts=1):
     return [alist[i * length // wanted_parts: (i + 1) * length // wanted_parts]
             for i in range(wanted_parts)]
 
+def remove_none(obj):
+    if isinstance(obj, (list, tuple, set)):
+        return type(obj)(remove_none(x) for x in obj if x is not None)
+    elif isinstance(obj, dict):
+        return type(obj)((remove_none(k), remove_none(v))
+                         for k, v in obj.items() if k is not None and v is not None)
+    else:
+        return obj
+
 def hastebin(text):
     print(text)
     url = r"https://hastebin.com/documents/"
@@ -193,5 +204,8 @@ def hastebin(text):
     results = [requests.post(url, text) for text in blocks]
     print(results)
     return ["https://hastebin.com/" + json.loads(response.text)["key"] for response in results]
+
 def dict2rows(in_dict):
     return [(k, str(v)) for k, v in in_dict.items()]
+
+
