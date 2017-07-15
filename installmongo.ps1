@@ -17,7 +17,7 @@ storage:
 $cfg | Out-File "$mongoDataFolder\mongod.cfg"
  
 Write-Host "Install Service"
-&"$Env:ProgramFiles\MongoDB\Server\3.0\bin\mongod.exe" --config "$mongoDataFolder\mongod.cfg" --install | Out-Null
+&"$Env:ProgramFiles\MongoDB\Server\3.4\bin\mongod.exe" --config "$mongoDataFolder\mongod.cfg" --install | Out-Null
  
 Write-Host "Configure Service"
 Set-Service -Name MongoDB -StartupType Automatic
