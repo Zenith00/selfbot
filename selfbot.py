@@ -676,32 +676,36 @@ async def command_avatar(params, message_in):
             await client.edit_profile(
                 password=DISCORD_PASSWORD, avatar=ava.read())
     if params[0] == "set":
+        if "." not in params[1]:
+            params[1] += ".png"
         with open(os.path.join(os.path.dirname(__file__), "avatars", params[1] + ".png"), "rb") as ava:
             await client.edit_profile(
                 password=DISCORD_PASSWORD, avatar=ava.read())
 
 async def command_tag(params, message_in):
     pass
-
-    if params[0] == "set":
-        tag_str = params[1]
-        expansion = " ".join(params[2:])
-        await mongo_client.discord.tags.update_one({"tag":tag_str},{"$set":{"expansion": expansion}}, upsert=True)
-        await relay("Set `{}{}`\n to expand to ```{}\n```".format(config["prefix"]["tag"], tag_str, expansion))
-    if params[0] == "list":
-        tags = {}
-        async for doc in mongo_client.discord.tags.find({}):
-            tags[doc["tag"]] = doc["expansion"]
-        if tags:
-            await relay(dict2rows(tags), "rows")
-        else:
-            await relay("No tags")
-    if params[0] == "unset":
-        res = await mongo_client.discord.tags.find_one_and_delete({"tag":params[1]})
-        if res:
-            await relay("Unset `{}{}`\n expanding to ```{}\n```".format(config["prefix"]["tag"], res["tag"], res["expansion"]))
-        else:
-            await relay("Tag not found")
+    try:
+        if params[0] == "set":
+            tag_str = params[1]
+            expansion = " ".join(params[2:])
+            await mongo_client.discord.tags.update_one({"tag":tag_str},{"$set":{"expansion": expansion}}, upsert=True)
+            await relay("Set `{}{}`\n to expand to ```{}\n```".format(config["prefix"]["tag"], tag_str, expansion))
+        if params[0] == "list":
+            tags = {}
+            async for doc in mongo_client.discord.tags.find({}):
+                tags[doc["tag"]] = doc["expansion"]
+            if tags:
+                await relay(dict2rows(tags), "rows")
+            else:
+                await relay("No tags")
+        if params[0] == "unset":
+            res = await mongo_client.discord.tags.find_one_and_delete({"tag":params[1]})
+            if res:
+                await relay("Unset `{}{}`\n expanding to ```{}\n```".format(config["prefix"]["tag"], res["tag"], res["expansion"]))
+            else:
+                await relay("Tag not found")
+    except:
+        await trace(traceback.format_exc())
 # IMGUR
 async def more_jpeg(url):
     response = requests.get(url)
