@@ -17,6 +17,7 @@ import motor.motor_asyncio
 import pymongo
 import requests
 import pip
+from io import BytesIO, StringIO
 from imgurpython import ImgurClient
 from unidecode import unidecode
 from utils import utils_text, utils_image, utils_parse
@@ -191,7 +192,7 @@ async def ensure_database_struct():
         except:
             await trace(traceback.format_exc())
 
-    # await mongo_client.discord.userinfo.update_many({}, {"$pull": {"server_joins": None, "server_leaves": None, "bans": None, "unbans": None}})
+            # await mongo_client.discord.userinfo.update_many({}, {"$pull": {"server_joins": None, "server_leaves": None, "bans": None, "unbans": None}})
 
 async def update_members():
     for server in client.servers:
@@ -208,9 +209,12 @@ async def update_messages():
     datetime = dateparser.parse(newest["date"])
     for server in client.servers:
         for channel in server.channels:
-            async for message in client.logs_from(
-                    channel, after=datetime, limit=1000000):
-                await import_message(message)
+            try:
+                async for message in client.logs_from(
+                        channel, after=datetime, limit=1000000):
+                    await import_message(message)
+            except discord.errors.Forbidden:
+                pass
 
 # Frontend
 
@@ -224,7 +228,7 @@ async def on_message(message_in):
                 expanded_list = []
                 for word in base_list:
                     if word.startswith(config["prefix"]["tag"]):
-                        res = await mongo_client.discord.tags.find_one({"tag":word[2:]})
+                        res = await mongo_client.discord.tags.find_one({"tag": word[2:]})
                         if res:
                             expanded_list.append(res["expansion"])
                         else:
@@ -320,8 +324,8 @@ async def perform_command(command, params, message_in):
         output.append(("inplace", big_text, "text"))
     if command == "ava":
         await command_avatar(params, message_in)
-
-
+    if command == "exec":
+        output.append(await command_exec(params, message_in))
     # Requires IMGUR
     if command == "jpeg":
         url = params[0]
@@ -461,7 +465,51 @@ async def log_query_parser(query, context):
         print(traceback.format_exc())
         return "Syntax not recognized. Proper syntax: %%logs 500 user 1111 2222 channel 3333 4444 5555 server 6666. \n Debug: ```py\n{}```".format(
             traceback.format_exc())
+async def command_exec(params, message_in):
+    input_command = " ".join(params[1:])
+    if "..ch" in input_command:
+        input_command = input_command.replace("..ch", 'client.get_channel("{}")'.format(message_in.channel.id))
+    if "..sh" in input_command:
+        input_command = input_command.replace("..sh", 'client.get_server("{}")'.format(message_in.server.id))
 
+    if params[0] == "aeval":
+        print(input_command)
+        res = await eval(input_command)
+    if params[0] == "co":
+
+        ""
+        command = (
+            'import asyncio\n'
+            'client.loop.create_task({command})').format(command=input_command)
+        await relay(command)
+        await relay(input_command)
+        old_stdout = sys.stdout
+        redirected_output = sys.stdout = StringIO()
+        try:
+            exec(input_command)
+        except Exception:
+            await relay('```py\n{}\n```'.format(traceback.format_exc()))
+        finally:
+            sys.stdout = old_stdout
+        if redirected_output.getvalue():
+            return ("inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, redirected_output.getvalue()), None)
+    if params[0] == "eval":
+        res = eval(input_command)
+        return ("inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, res), None)
+
+    if params[0] == "base":
+        old_stdout = sys.stdout
+        redirected_output = sys.stdout = StringIO()
+        try:
+            exec(input_command)
+        except Exception:
+            formatted_lines = traceback.format_exc().splitlines()
+            await relay('```py\n{}\n{}\n```'.format(formatted_lines[-1], '\n'.join(formatted_lines[4:-1])))
+        finally:
+            sys.stdout = old_stdout
+        if redirected_output.getvalue():
+            return "inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, redirected_output.getvalue()), None
+    return "trash",None, None
 async def command_query(params, message_in):
     try:
         if params[0] == "user":
@@ -691,7 +739,7 @@ async def command_tag(params, message_in):
         if params[0] == "set":
             tag_str = params[1]
             expansion = " ".join(params[2:])
-            await mongo_client.discord.tags.update_one({"tag":tag_str},{"$set":{"expansion": expansion}}, upsert=True)
+            await mongo_client.discord.tags.update_one({"tag": tag_str}, {"$set": {"expansion": expansion}}, upsert=True)
             await relay("Set `{}{}`\n to expand to ```{}\n```".format(config["prefix"]["tag"], tag_str, expansion))
         if params[0] == "list":
             tags = {}
@@ -702,7 +750,7 @@ async def command_tag(params, message_in):
             else:
                 await relay("No tags")
         if params[0] == "unset":
-            res = await mongo_client.discord.tags.find_one_and_delete({"tag":params[1]})
+            res = await mongo_client.discord.tags.find_one_and_delete({"tag": params[1]})
             if res:
                 await relay("Unset `{}{}`\n expanding to ```{}\n```".format(config["prefix"]["tag"], res["tag"], res["expansion"]))
             else:
@@ -1075,6 +1123,7 @@ class Unbuffered(object):
 
     def __getattr__(self, attr):
         return getattr(self.stream, attr)
+
 
 import sys
 
