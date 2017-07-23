@@ -221,7 +221,7 @@ async def update_messages():
 
 # Frontend
 
-#test
+
 @client.event
 async def on_message(message_in):
     await mess2log(message_in)
