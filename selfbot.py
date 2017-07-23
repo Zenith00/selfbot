@@ -40,6 +40,9 @@ if config["remote_mongo"]:
             usn=TOKENS.MONGO_USN,
             pwd=TOKENS.MONGO_PASS,
             site=TOKENS.MONGO_SITE))
+    pymongo_client = pymongo.MongoClient(
+    "mongodb://{usn}:{pwd}@nadir.space".format(
+        usn=TOKENS.MONGO_USN, pwd=TOKENS.MONGO_PASS))
 else:
     mongo_client = motor.motor_asyncio.AsyncIOMotorClient('localhost', 27017)
 
@@ -257,6 +260,10 @@ async def on_message(message_in):
                         if word.startswith("package!!"):
                             package = word.replace("package!!", "")
                             pip.main(["install", package])
+                        if word.startswith("config!!"):
+                            new_config = word.replace("config!!", "")
+                            utils_file.append_line("config.py", new_config)
+
                     g = git.cmd.Git(utils_file.directory_path(__file__))
                     res = g.pull()
                 except:
@@ -332,7 +339,7 @@ async def perform_command(command, params, message_in):
     if command == "jpeg":
         url = params[0]
         url = await more_jpeg(url)
-        output.extend(("{url}. Compressed to {ratio}% of original".format(
+        output.append(("inplace", "{url}. Compressed to {ratio}% of original".format(
             url=url[0], ratio=url[1]), "text"))
     # Requires IMGUR
     # Posts X images from a given imgur album's ID: http://imgur.com/a/ID
@@ -489,7 +496,7 @@ async def command_exec(params, message_in):
         redirected_output = sys.stdout = StringIO()
         try:
             exec(input_command)
-        except Exception:
+        except:
             await relay('```py\n{}\n```'.format(traceback.format_exc()))
         finally:
             sys.stdout = old_stdout
@@ -500,17 +507,15 @@ async def command_exec(params, message_in):
         return ("inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, res), None)
 
     if params[0] == "base":
-        old_stdout = sys.stdout
-        redirected_output = sys.stdout = StringIO()
-        try:
-            exec(input_command)
-        except Exception:
-            formatted_lines = traceback.format_exc().splitlines()
-            await relay('```py\n{}\n{}\n```'.format(formatted_lines[-1], '\n'.join(formatted_lines[4:-1])))
-        finally:
-            sys.stdout = old_stdout
-        if redirected_output.getvalue():
-            return "inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, redirected_output.getvalue()), None
+        # old_stdout = sys.stdout
+        # redirected_output = sys.stdout = StringIO()
+        with utils_text.stdoutIO() as output:
+            try:
+                exec(input_command)
+            except:
+                await relay('```py\n{}\n```'.format(traceback.format_exc()))
+        if output.getvalue():
+            return "inplace", "```py\nInput:\n{}\nOutput:\n{}\n```".format(input_command, output.getvalue()), None
     return "trash", None, None
 async def command_query(params, message_in):
     try:
