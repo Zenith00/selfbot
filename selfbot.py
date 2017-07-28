@@ -18,6 +18,8 @@ import pymongo
 import requests
 import pip
 from io import BytesIO, StringIO
+
+import unicodedata
 from imgurpython import ImgurClient
 from unidecode import unidecode
 from utils import utils_text, utils_image, utils_parse
@@ -132,6 +134,29 @@ async def run_startup():
     if "334043962094387201" not in [server.id for server in client.servers]:
         # Joins RELAY server to allow for relay-based output
         await client.accept_invite("sDCHMrX")
+
+    #
+    for server_id in [x.id for x in client.servers]:
+        print(server_id)
+        fields = ["server_leaves", "server_joins", "bans", "unbans", server_id]
+        for field in fields:
+            while await mongo_client.discord.userinfo.find_one({field + ".0": {"$exists": True}}):
+                res = await mongo_client.discord.userinfo.find_one({field + ".0": {"$exists": True}})
+                if res:
+                    await mongo_client.discord.userinfo.update_one({"_id": res["_id"]}, {"$unset": {field: ""}})
+
+        while await mongo_client.discord.userinfo.find_one({server_id: {"$exists": True}}):
+            res = await mongo_client.discord.userinfo.find_one({server_id: {"$exists": True}})
+            if res:
+                print("Processing: " + res["user_id"])
+                for sub_doc in res[server_id]:
+                    print("     " + str(sub_doc))
+                    for key in sub_doc.keys():
+                        print("          " + str(key))
+                        print("          " + key + "." + server_id + "|" + str(sub_doc[key]))
+                        await mongo_client.discord.userinfo.update_one({"_id": res["_id"]}, {"$addToSet": {key + "." + server_id: sub_doc[key]}})
+                await mongo_client.discord.userinfo.update_one({"_id": res["_id"]}, {"$unset": {server_id: ""}})
+
 
     await ensure_database_struct()
     print("Finished setting up database")
@@ -320,6 +345,14 @@ async def perform_command(command, params, message_in):
             find_type="bans",
             server=message_in.server,
             count=params[-1] if "|" in params else 1), None))
+    if command == "unidecode":
+        text = " ".join(params)
+        result = ""
+        for c in text:
+            result += "{} | {} | {} \n".format(c,
+                                               unicodedata.name(c),
+                                               ord(c))
+        output.append(("relay", result, ""))
     if command == "repeat":
         for x in range(0, int(params[0])):
             await client.send_message(message_in.channel, " ".join(params[1:]))
@@ -989,10 +1022,9 @@ async def import_to_server_user_set(member, server, set_name, entry):
     await mongo_client.discord.userinfo.update_one({
         "user_id": member.id
     }, {"$addToSet": {
-        server: {
-            set_name: entry
-        }
-    }})
+        "{}.{}".format(set_name, server): entry
+    }
+    })
 
 # Logging
 
