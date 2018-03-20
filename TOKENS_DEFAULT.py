@@ -6,7 +6,6 @@ IMGUR_SECRET_ID = ""
 
 AUTH_TOKEN =""
 
-APSIS_AUTH_TOKEN = ""
 
 USER_AUTH_TOKEN = ""
 
